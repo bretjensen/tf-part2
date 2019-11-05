@@ -1,4 +1,6 @@
 .terraform/
+.aws/
 terraform.tfstate
 terraform.tfstate.backup
 terraform.plan
+m3.plan
