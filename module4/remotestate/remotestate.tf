@@ -19,7 +19,7 @@ provider "aws" {
 data "template_file" "application_bucket_policy" {
   template = "${file("templates/bucket_policy.tpl")}"
 
-  vars {
+  vars = {
     read_only_user_arn   = "${aws_iam_user.marymoe.arn}"
     full_access_user_arn = "${aws_iam_user.sallysue.arn}"
     s3_bucket            = "${var.aws_application_bucket}"
@@ -29,10 +29,30 @@ data "template_file" "application_bucket_policy" {
 data "template_file" "network_bucket_policy" {
   template = "${file("templates/bucket_policy.tpl")}"
 
-  vars {
+  vars = {
     read_only_user_arn   = "${aws_iam_user.sallysue.arn}"
     full_access_user_arn = "${aws_iam_user.marymoe.arn}"
     s3_bucket            = "${var.aws_networking_bucket}"
+  }
+}
+
+data "template_file" "mary_moe_policy" {
+  template = "${file("templates/user_policy.tpl")}"
+
+  vars = {
+    s3_rw_bucket       = "${var.aws_networking_bucket}"
+    s3_ro_bucket       = "${var.aws_application_bucket}"
+    dynamodb_table_arn = "${aws_dynamodb_table.terraform_statelock.arn}"
+  }
+}
+
+data "template_file" "sally_sue_policy" {
+  template = "${file("templates/user_policy.tpl")}"
+
+  vars = {
+    s3_rw_bucket       = "${var.aws_application_bucket}"
+    s3_ro_bucket       = "${var.aws_networking_bucket}"
+    dynamodb_table_arn = "${aws_dynamodb_table.terraform_statelock.arn}"
   }
 }
 
@@ -57,34 +77,7 @@ resource "aws_s3_bucket" "ddtnet" {
     enabled = true
   }
 
-  policy = <<EOF
-{
-    "Version": "2008-10-17",
-    "Statement": [
-        {
-            "Sid": "ReadforAppTeam",
-            "Effect": "Allow",
-            "Principal": {
-                "AWS": "${aws_iam_user.sallysue.arn}"
-            },
-            "Action": "s3:GetObject",
-            "Resource": "arn:aws:s3:::${var.aws_networking_bucket}/*"
-        },
-        {
-            "Sid": "",
-            "Effect": "Allow",
-            "Principal": {
-                "AWS": "${aws_iam_user.marymoe.arn}"
-            },
-            "Action": "s3:*",
-            "Resource": [
-                "arn:aws:s3:::${var.aws_networking_bucket}",
-                "arn:aws:s3:::${var.aws_networking_bucket}/*"
-            ]
-        }
-    ]
-}
-EOF
+  policy = "${data.template_file.network_bucket_policy.rendered}"
 }
 
 resource "aws_s3_bucket" "ddtapp" {
@@ -95,78 +88,18 @@ resource "aws_s3_bucket" "ddtapp" {
   versioning {
     enabled = true
   }
-  policy = <<EOF
-{
-    "Version": "2008-10-17",
-    "Statement": [
-        {
-            "Sid": "ReadforNetTeam",
-            "Effect": "Allow",
-            "Principal": {
-                "AWS": "${aws_iam_user.marymoe.arn}"
-            },
-            "Action": "s3:GetObject",
-            "Resource": "arn:aws:s3:::${var.aws_application_bucket}/*"
-        },
-        {
-            "Sid": "",
-            "Effect": "Allow",
-            "Principal": {
-                "AWS": "${aws_iam_user.sallysue.arn}"
-            },
-            "Action": "s3:*",
-            "Resource": [
-                "arn:aws:s3:::${var.aws_application_bucket}",
-                "arn:aws:s3:::${var.aws_application_bucket}/*"
-            ]
-        }
-    ]
-}
-EOF
-}
-
-resource "aws_iam_group" "ec2admin" {
-  name = "EC2Admin"
-}
-
-resource "aws_iam_group_policy_attachment" "ec2admin-attach" {
-  group      = "${aws_iam_group.ec2admin.name}"
-  policy_arn = "arn:aws:iam::aws:policy/AmazonEC2FullAccess"
+  policy = "${data.template_file.application_bucket_policy.rendered}"
 }
 
 resource "aws_iam_user" "sallysue" {
   name = "sallysue"
 }
 
-resource "aws_iam_access_key" "sallysue" {
-  user = "${aws_iam_user.sallysue.name}"
-}
-
 resource "aws_iam_user_policy" "sallysue_rw" {
-  name   = "sallysue"
-  user   = "${aws_iam_user.sallysue.name}"
-  policy = <<EOF
-{
-    "Version": "2012-10-17",
-    "Statement": [
-        {
-            "Effect": "Allow",
-            "Action": "s3:*",
-            "Resource": [
-                "arn:aws:s3:::${var.aws_application_bucket}",
-                "arn:aws:s3:::${var.aws_application_bucket}/*"
-            ]
-        },
-        {
-            "Effect": "Allow",
-            "Action": ["dynamodb:*"],
-            "Resource": [
-                "${aws_dynamodb_table.terraform_statelock.arn}"
-            ]
-        }
-    ]
-}
-EOF
+  name = "sallysue"
+  user = "${aws_iam_user.sallysue.name}"
+
+  policy = "${data.template_file.sally_sue_policy.rendered}"
 }
 
 resource "aws_iam_user" "marymoe" {
@@ -178,39 +111,53 @@ resource "aws_iam_access_key" "marymoe" {
 }
 
 resource "aws_iam_user_policy" "marymoe_rw" {
-  name   = "marymoe"
-  user   = "${aws_iam_user.marymoe.name}"
-  policy = <<EOF
-{
-    "Version": "2012-10-17",
-    "Statement": [
-        {
-            "Effect": "Allow",
-            "Action": "s3:*",
-            "Resource": [
-                "arn:aws:s3:::${var.aws_networking_bucket}",
-                "arn:aws:s3:::${var.aws_networking_bucket}/*"
-            ]
-        },
-        {
-            "Effect": "Allow",
-            "Action": ["dynamodb:*"],
-            "Resource": [
-                "${aws_dynamodb_table.terraform_statelock.arn}"
-            ]   
-        }
-    ]
-}
-EOF
+  name = "marymoe"
+  user = "${aws_iam_user.marymoe.name}"
+
+  policy = "${data.template_file.mary_moe_policy.rendered}"
 }
 
-resource "aws_iam_group_membership" "addsally" {
-  name = "add-sally"
+resource "aws_iam_access_key" "sallysue" {
+  user = "${aws_iam_user.sallysue.name}"
+}
+
+resource "aws_iam_group" "rdsadmin" {
+  name = "RDSAdmin"
+}
+
+resource "aws_iam_group_policy_attachment" "rdsadmin-attach" {
+  group      = "${aws_iam_group.rdsadmin.name}"
+  policy_arn = "arn:aws:iam::aws:policy/AmazonRDSFullAccess"
+}
+
+resource "aws_iam_group" "ec2admin" {
+  name = "EC2Admin"
+}
+
+resource "aws_iam_group_policy_attachment" "ec2admin-attach" {
+  group      = "${aws_iam_group.ec2admin.name}"
+  policy_arn = "arn:aws:iam::aws:policy/AmazonEC2FullAccess"
+}
+
+resource "aws_iam_group_membership" "add-ec2admin" {
+  name = "add-ec2admin"
+
+  users = [
+    "${aws_iam_user.sallysue.name}",
+    "${aws_iam_user.marymoe.name}"
+  ]
+
+  group = "${aws_iam_group.ec2admin.name}"
+}
+
+resource "aws_iam_group_membership" "add-rdsadmin" {
+  name = "add-rdsadmin"
+
   users = [
     "${aws_iam_user.sallysue.name}"
   ]
 
-  group = "EC2Admin"
+  group = "${aws_iam_group.rdsadmin.name}"
 }
 
 resource "local_file" "aws_keys" {
